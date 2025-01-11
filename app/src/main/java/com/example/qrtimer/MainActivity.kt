@@ -1,5 +1,6 @@
 package com.example.qrtimer
 
+import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
@@ -23,6 +24,12 @@ class MainActivity : AppCompatActivity() {
     private var timerInput = 0L
     private var shouldResumeRingtone = false
     private lateinit var keypadButtons: List<Button>
+    private var isTimerOrServiceActive = false // Flag to track if timer or service is active
+
+    companion object {
+        private const val PREF_NAME = "timer_prefs"
+        private const val KEY_IS_TIMER_OR_SERVICE_ACTIVE = "isTimerOrServiceActive"
+    }
 
     @RequiresApi(Build.VERSION_CODES.P)
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -44,7 +51,15 @@ class MainActivity : AppCompatActivity() {
             }
         }
         setupKeypadButtons()
+
+        // Restore state from SharedPreferences
+        val sharedPreferences = getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        isTimerOrServiceActive = sharedPreferences.getBoolean(KEY_IS_TIMER_OR_SERVICE_ACTIVE, false)
+        if (isTimerOrServiceActive) {
+            disableKeypadButtons()
+        }
     }
+
 
     private fun setupKeypadButtons() {
         val buttonIds = listOf(
@@ -101,6 +116,8 @@ class MainActivity : AppCompatActivity() {
         }
         stopRingtoneService()
         disableKeypadButtons()
+        isTimerOrServiceActive = true
+        saveTimerState() // Save state to SharedPreferences
         val totalSeconds = (timerInput / 10000) * 3600 + ((timerInput % 10000) / 100) * 60 + (timerInput % 100)
         countDownTimer?.cancel()
         isTimerRunning = true
@@ -151,6 +168,8 @@ class MainActivity : AppCompatActivity() {
         stopRingtoneService()
         timerText.text = "00h 00m 00s"
         enableKeypadButtons()
+        isTimerOrServiceActive = false
+        saveTimerState() // Save state to SharedPreferences
         Toast.makeText(this, "Timer Stopped!", Toast.LENGTH_SHORT).show()
     }
 
@@ -162,14 +181,18 @@ class MainActivity : AppCompatActivity() {
         } else {
             startService(serviceIntent)
         }
-        disableKeypadButtons() // Disable buttons when ringtone service starts
+        disableKeypadButtons()
+        isTimerOrServiceActive = true
+        saveTimerState() // Save state to SharedPreferences
     }
 
     private fun stopRingtoneService() {
         val serviceIntent = Intent(this, RingtoneService::class.java)
         serviceIntent.action = RingtoneService.ACTION_STOP_RINGTONE
         startService(serviceIntent)
-        enableKeypadButtons() // Enable buttons when ringtone service stops
+        enableKeypadButtons()
+        isTimerOrServiceActive = false
+        saveTimerState() // Save state to SharedPreferences
     }
 
     private fun isServiceRunning(): Boolean {
@@ -187,5 +210,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun enableKeypadButtons() {
         keypadButtons.forEach { it.isEnabled = true }
+    }
+
+    private fun saveTimerState() {
+        val sharedPreferences = getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        val editor = sharedPreferences.edit()
+        editor.putBoolean(KEY_IS_TIMER_OR_SERVICE_ACTIVE, isTimerOrServiceActive)
+        editor.apply()
     }
 }
