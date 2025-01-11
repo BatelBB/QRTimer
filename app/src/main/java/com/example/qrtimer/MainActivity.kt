@@ -1,9 +1,7 @@
 package com.example.qrtimer
 
+import android.content.Context
 import android.content.Intent
-import android.media.Ringtone
-import android.media.RingtoneManager
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.CountDownTimer
@@ -14,6 +12,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresApi
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.ui.semantics.text
+import kotlin.io.path.name
 
 class MainActivity : AppCompatActivity() {
 
@@ -23,9 +22,14 @@ class MainActivity : AppCompatActivity() {
     private var countDownTimer: CountDownTimer? = null
     private var isTimerRunning = false
     private var timerInput = 0L
-    private var ringtone: Ringtone? = null
-    private var isRingtonePlaying = false
     private var shouldResumeRingtone = false
+    private lateinit var keypadButtons: List<Button>
+    private var isTimerOrServiceActive = false // Flag to track if timer or service is active
+
+    companion object {
+        private const val PREF_NAME = "timer_prefs"
+        private const val KEY_IS_TIMER_OR_SERVICE_ACTIVE = "isTimerOrServiceActive"
+    }
 
     @RequiresApi(Build.VERSION_CODES.P)
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -39,13 +43,32 @@ class MainActivity : AppCompatActivity() {
         setupKeypadListeners()
         deleteButton.setOnClickListener { deleteLastInput() }
         stopButton.setOnClickListener {
-            if (isTimerRunning || isRingtonePlaying) {
+            if (isTimerRunning || isServiceRunning()) {
                 shouldResumeRingtone = true
                 openQrScanner()
             } else {
                 Toast.makeText(this, "Timer is not running", Toast.LENGTH_SHORT).show()
             }
         }
+        setupKeypadButtons()
+
+        // Restore state from SharedPreferences
+        val sharedPreferences = getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        isTimerOrServiceActive = sharedPreferences.getBoolean(KEY_IS_TIMER_OR_SERVICE_ACTIVE, false)
+        if (isTimerOrServiceActive) {
+            disableKeypadButtons()
+        }
+    }
+
+
+    private fun setupKeypadButtons() {
+        val buttonIds = listOf(
+            R.id.button1, R.id.button2, R.id.button3,
+            R.id.button4, R.id.button5, R.id.button6,
+            R.id.button7, R.id.button8, R.id.button9,
+            R.id.button00, R.id.button0, R.id.startButton
+        )
+        keypadButtons = buttonIds.map { findViewById(it) }
     }
 
     private fun setupKeypadListeners() {
@@ -91,7 +114,10 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "Please set a valid time", Toast.LENGTH_SHORT).show()
             return
         }
-
+        stopRingtoneService()
+        disableKeypadButtons()
+        isTimerOrServiceActive = true
+        saveTimerState() // Save state to SharedPreferences
         val totalSeconds = (timerInput / 10000) * 3600 + ((timerInput % 10000) / 100) * 60 + (timerInput % 100)
         countDownTimer?.cancel()
         isTimerRunning = true
@@ -108,9 +134,9 @@ class MainActivity : AppCompatActivity() {
             @RequiresApi(Build.VERSION_CODES.P)
             override fun onFinish() {
                 isTimerRunning = false
-                timerInput = 0L // Reset timerInput to 0
+                timerInput = 0L
                 timerText.text = "00h 00m 00s"
-                playRingtone()
+                startRingtoneService()
                 Toast.makeText(this@MainActivity, "Timer Finished!", Toast.LENGTH_SHORT).show()
             }
         }.start()
@@ -131,7 +157,6 @@ class MainActivity : AppCompatActivity() {
             shouldResumeRingtone = false
         } else {
             if (shouldResumeRingtone) {
-                playRingtone()
                 shouldResumeRingtone = false
             }
         }
@@ -140,41 +165,57 @@ class MainActivity : AppCompatActivity() {
     private fun stopTimer() {
         countDownTimer?.cancel()
         isTimerRunning = false
-        stopRingtone()
+        stopRingtoneService()
         timerText.text = "00h 00m 00s"
+        enableKeypadButtons()
+        isTimerOrServiceActive = false
+        saveTimerState() // Save state to SharedPreferences
         Toast.makeText(this, "Timer Stopped!", Toast.LENGTH_SHORT).show()
     }
 
-    @RequiresApi(Build.VERSION_CODES.P)
-    private fun playRingtone() {
-        try {
-            val notification: Uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-            ringtone = RingtoneManager.getRingtone(applicationContext, notification)
-            ringtone?.isLooping = true
-            ringtone?.play()
-            isRingtonePlaying = true
-        } catch (e: Exception) {
-            e.printStackTrace()
-            Toast.makeText(this, "Could not play ringtone", Toast.LENGTH_SHORT).show()
+    private fun startRingtoneService() {
+        val serviceIntent = Intent(this, RingtoneService::class.java)
+        serviceIntent.action = RingtoneService.ACTION_START_RINGTONE
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent)
+        } else {
+            startService(serviceIntent)
         }
+        disableKeypadButtons()
+        isTimerOrServiceActive = true
+        saveTimerState() // Save state to SharedPreferences
     }
 
-    private fun stopRingtone() {
-        ringtone?.stop()
-        ringtone = null
-        isRingtonePlaying = false
+    private fun stopRingtoneService() {
+        val serviceIntent = Intent(this, RingtoneService::class.java)
+        serviceIntent.action = RingtoneService.ACTION_STOP_RINGTONE
+        startService(serviceIntent)
+        enableKeypadButtons()
+        isTimerOrServiceActive = false
+        saveTimerState() // Save state to SharedPreferences
     }
 
-    override fun onPause() {
-        super.onPause()
-        stopRingtone()
-    }
-
-    @RequiresApi(Build.VERSION_CODES.P)
-    override fun onResume() {
-        super.onResume()
-        if (shouldResumeRingtone) {
-            playRingtone()
+    private fun isServiceRunning(): Boolean {
+        val manager = getSystemService(ACTIVITY_SERVICE) as android.app.ActivityManager
+        for (service in manager.getRunningServices(Int.MAX_VALUE)) {
+            if (RingtoneService::class.java.name == service.service.className) {
+                return true
+            }
         }
+        return false
+    }
+    private fun disableKeypadButtons() {
+        keypadButtons.forEach { it.isEnabled = false }
+    }
+
+    private fun enableKeypadButtons() {
+        keypadButtons.forEach { it.isEnabled = true }
+    }
+
+    private fun saveTimerState() {
+        val sharedPreferences = getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        val editor = sharedPreferences.edit()
+        editor.putBoolean(KEY_IS_TIMER_OR_SERVICE_ACTIVE, isTimerOrServiceActive)
+        editor.apply()
     }
 }

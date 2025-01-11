@@ -6,6 +6,9 @@
         android:name="android.hardware.camera"
         android:required="false" />
     <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+
 
     <application
         android:allowBackup="true"
@@ -31,6 +34,11 @@
         <activity android:name=".QrScannerActivity"
             android:theme="@style/Theme.AppCompat.Light.NoActionBar"
             android:exported="false"/>
+        <service
+            android:name=".RingtoneService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
         <meta-data
             android:name="com.google.mlkit.vision.DEPENDENCIES"
             android:value="barcode" />
