@@ -1,9 +1,6 @@
 package com.example.qrtimer
 
 import android.content.Intent
-import android.media.Ringtone
-import android.media.RingtoneManager
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.CountDownTimer
@@ -14,6 +11,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresApi
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.ui.semantics.text
+import kotlin.io.path.name
 
 class MainActivity : AppCompatActivity() {
 
@@ -23,8 +21,6 @@ class MainActivity : AppCompatActivity() {
     private var countDownTimer: CountDownTimer? = null
     private var isTimerRunning = false
     private var timerInput = 0L
-    private var ringtone: Ringtone? = null
-    private var isRingtonePlaying = false
     private var shouldResumeRingtone = false
 
     @RequiresApi(Build.VERSION_CODES.P)
@@ -39,7 +35,7 @@ class MainActivity : AppCompatActivity() {
         setupKeypadListeners()
         deleteButton.setOnClickListener { deleteLastInput() }
         stopButton.setOnClickListener {
-            if (isTimerRunning || isRingtonePlaying) {
+            if (isTimerRunning || isServiceRunning()) {
                 shouldResumeRingtone = true
                 openQrScanner()
             } else {
@@ -108,9 +104,9 @@ class MainActivity : AppCompatActivity() {
             @RequiresApi(Build.VERSION_CODES.P)
             override fun onFinish() {
                 isTimerRunning = false
-                timerInput = 0L // Reset timerInput to 0
+                timerInput = 0L
                 timerText.text = "00h 00m 00s"
-                playRingtone()
+                startRingtoneService()
                 Toast.makeText(this@MainActivity, "Timer Finished!", Toast.LENGTH_SHORT).show()
             }
         }.start()
@@ -131,7 +127,6 @@ class MainActivity : AppCompatActivity() {
             shouldResumeRingtone = false
         } else {
             if (shouldResumeRingtone) {
-                playRingtone()
                 shouldResumeRingtone = false
             }
         }
@@ -140,41 +135,34 @@ class MainActivity : AppCompatActivity() {
     private fun stopTimer() {
         countDownTimer?.cancel()
         isTimerRunning = false
-        stopRingtone()
+        stopRingtoneService()
         timerText.text = "00h 00m 00s"
         Toast.makeText(this, "Timer Stopped!", Toast.LENGTH_SHORT).show()
     }
 
-    @RequiresApi(Build.VERSION_CODES.P)
-    private fun playRingtone() {
-        try {
-            val notification: Uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-            ringtone = RingtoneManager.getRingtone(applicationContext, notification)
-            ringtone?.isLooping = true
-            ringtone?.play()
-            isRingtonePlaying = true
-        } catch (e: Exception) {
-            e.printStackTrace()
-            Toast.makeText(this, "Could not play ringtone", Toast.LENGTH_SHORT).show()
+    private fun startRingtoneService() {
+        val serviceIntent = Intent(this, RingtoneService::class.java)
+        serviceIntent.action = RingtoneService.ACTION_START_RINGTONE
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent)
+        } else {
+            startService(serviceIntent)
         }
     }
 
-    private fun stopRingtone() {
-        ringtone?.stop()
-        ringtone = null
-        isRingtonePlaying = false
+    private fun stopRingtoneService() {
+        val serviceIntent = Intent(this, RingtoneService::class.java)
+        serviceIntent.action = RingtoneService.ACTION_STOP_RINGTONE
+        startService(serviceIntent)
     }
 
-    override fun onPause() {
-        super.onPause()
-        stopRingtone()
-    }
-
-    @RequiresApi(Build.VERSION_CODES.P)
-    override fun onResume() {
-        super.onResume()
-        if (shouldResumeRingtone) {
-            playRingtone()
+    private fun isServiceRunning(): Boolean {
+        val manager = getSystemService(ACTIVITY_SERVICE) as android.app.ActivityManager
+        for (service in manager.getRunningServices(Int.MAX_VALUE)) {
+            if (RingtoneService::class.java.name == service.service.className) {
+                return true
+            }
         }
+        return false
     }
 }
